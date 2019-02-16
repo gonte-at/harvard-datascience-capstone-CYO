@@ -1,0 +1,684 @@
+---
+title: "2015 Nepal Earthquake Reconstruction Need Prediction"
+author: "Guenter W."
+date: "Feb 15, 2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r , echo=FALSE, message=FALSE }
+ratio <- 0.005 # about 5,000 rows
+
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(gridExtra)) install.packages("gridExtra", repos = "http://cran.us.r-project.org")
+if(!require(scales)) install.packages("scales", repos = "http://cran.us.r-project.org")
+
+set.seed(1)
+
+```
+
+# 1 Executive summary / Overview
+
+The goal of this report is to present an analysis of data regarding need for reconstruction of buildings collected by the Central Bureau of Statistics after the 2015 Gorkha earthquake in Nepal. The data set consists mainly of aspects of building location and construction.
+
+The initial descriptive statistics of the data is followed by a presentation of potential relationships between building features and the need for reconstruction afer the earthquake. Based on the findings from this analysis and feature importance indicators, various categorical prediction models are created and compared in regards to their accuracy. Finally, an ensemble model is created.
+
+With our analysis, we show that it is possible to create a classification model that allows to reasonably predict the need for reconstruction of buildings caused by the 2015 Nepal earthquake based on its characteristics. 
+
+
+# 2 Introduction
+
+In April 2015, an earthquake in Nepal killed about 9,000 people and caused severe damage to existing buildings. More information about this disaster can be found here: https://en.wikipedia.org/wiki/April_2015_Nepal_earthquake
+
+## 2.1 Dataset source
+
+The website https://opendata.klldev.org hosts datasets regaring the 2015 Nepal Earthquake including data about affected individuals, buildings and househoulds. For this analysis, we focus on the Structural Data dataset from the Buildings section. The data can be obtained by manual download from the website https://opendata.klldev.org/#/download or via direct download link: https://opendata.klldev.org/statics/building_structure.zip
+
+```{r , echo=FALSE }
+dl_ <- tempfile()
+download.file("https://opendata.klldev.org/statics/building_structure.zip", dl_)
+unzip(dl_)
+
+buildings <- read.csv2("building_structure/csv_building_structure.csv", header = TRUE, sep = ",")
+```
+
+## 2.2 Dataset description
+
+The data set consists of 31 variables and 1052948 rows.
+
+```{r }
+dim(buildings)
+```
+
+The dataset consists of information on earthquake impacts, household conditions, and socio-economic-demographic statistics and has the following columns:
+
+- building_id: A unique ID that identifies a unique building from the survey(Datatype: Text)
+- district_id: District where the building is located(Datatype: Text)
+- vdcmun_id: Municipality where the building is located(Datatype: Text)
+- ward_id: Ward Number in which the building is located(Datatype: Text)
+- count_floors_pre_eq: Number of floors that the building had before the earthquake(Datatype: Number)
+- count_floors_post_eq: Number of floors that the building had after the earthquake(Datatype: Number)
+- age_building: Age of the building (in years)(Datatype: Number)
+- plinth_area_sq_ft: Plinth area of the building (in square feet)(Datatype: Number)
+- height_ft_pre_eq: Height of the building before the earthquake (in feet)(Datatype: Number)
+- height_ft_post_eq: Height of the building after the earthquake (in feet)(Datatype: Number)
+- land_surface_condition: Surface condition of the land in which the building is built(Datatype: Categorical)
+- foundation_type: Type of foundation used in the building(Datatype: Categorical)
+- roof_type: Type of roof used in the building(Datatype: Categorical)
+- ground_floor_type: Ground floor type (Datatype: Categorical)
+- other_floor_type: Type of construction used in other floors (except ground floor and roof)(Datatype: Categorical)
+- position: Position of the building(Datatype: Categorical)
+- plan_configuration: Building plan configuration(Datatype: Categorical)
+- has_superstructure_adobe_mud: Flag variable that indicates if the superstructure of the building is made of Adobe/Mud(Datatype: Boolean)
+- has_superstructure_mud_mortar_stone: Flag variable that indicates if the superstructure of the building is made of Mud Mortar - Stone(Datatype: Boolean)
+- has_superstructure_stone_flag: Flag variable that indicates if the superstructure of the building is made of Stone(Datatype: Boolean)
+- has_superstructure_cement_mortar_stone: Flag variable that indicates if the superstructure of the building is made of Stone(Datatype: Boolean)
+- has_superstructure_mud_mortar_brick: Flag variable that indicates if the superstructure of the building is made of Cement Mortar - Stone(Datatype: Boolean)
+- has_superstructure_cement_mortar_brick: Flag variable that indicates if the superstructure of the building is made of Mud Mortar - Brick(Datatype: Boolean)
+- has_superstructure_timber: Flag variable that indicates if the superstructure of the building is made of Timber(Datatype: Boolean)
+- has_superstructure_bamboo: Flag variable that indicates if the superstructure of the building is made of Bamboo(Datatype: Boolean)
+- has_superstructure_rc_non_engineered: Flag variable that indicates if the superstructure of the building is made of RC (reinforced concrete) (Non Engineered)(Datatype: Boolean)
+- has_superstructure_rc_engineered: Flag variable that indicates if the superstructure of the building is made of RC (reinforced concrete) (Engineered)(Datatype: Boolean)
+- has_superstructure_other: Flag variable that indicates if the superstructure of the building is made of any other material(Datatype: Boolean)
+- condition_post_eq: Actual contition of the building after the earthquake(Datatype: Categorical)
+- damage_grade: Damage grade assigned to the building by the surveyor after assessment(Datatype: Categorical)
+- technical_solution_proposed: Technical solution proposed by the surveyor after assessment(Datatype: Categorical)
+- id: A unique ID that identifies a unique information from all table(Datatype: Number)
+
+## 2.3 Goal of Analysis
+
+The goal of this analysis is to develop a suitable supervised prediction model to predict if a building needs
+reconstruction or not.
+
+# 3 Methods
+
+In order to tackle the defined analysis goal, we lay out the following analysis process:
+
+- Data preparation / Cleansing: In the data preparation step, we remove missing rows and all features that were unknown at the time of the earthquake. In addition, we create the label of interest _reconstruction_needed_ and normalize continuous features.
+- Explorative data analysis (EDA) including feature statistics and visualization: We use visualization and statistical indicators to get and overview of the data set. In particular, we examine the relationship of the data set features with the need for reconstruction which represents the label of interest.
+- Feature selection based on findings from EDA and importance settings of models: In order to create an efficient and simple prediction model for the prediction of the need for reconstruction, we use our findings from the EDA and the importance features from various models. We limit the features in the data set to those that seem to have an influence on _reconstruction_needed_. Therefore, we take a two-steps approach. First, we select features based on our findings from the EDA. Second, we employ a handful of models from the Caret package that include feature importance
+- Prediction model creation using the Caret library in R: We create a variety of models as well as an ensembled model and compare the accuracy of these models in order to find the best performing model.
+
+# 4 Data preparation / Cleansing
+
+The data set doesn't contain missing values.
+
+```{r }
+sum(is.na(buildings))
+```
+
+It includes the following variables.
+
+```{r}
+str(buildings)
+```
+
+Since the variables _damage_grade_, _count_floors_post_eq_, _height_ft_post_eq_ and _condition_post_eq_ contain data that was unknown before the disaster, we exclude those variables as well as the building ID from the data set. 
+
+```{r }
+buildings <- buildings[ , -c(1, 3, 4, 6, 10, 29, 30)]
+```
+
+As a next step, we create the label variable based on the column technical_solution_proposed. First, we filter out all rows with an unknown _technical_solution_proposed_. Then, we rename the column _technical_solution_proposed_ to _reconstruction_needed_ and create two new levels that indicate that the building needs reconstruction or not.
+
+```{r }
+# we filter out all rows with an unknown technical_solution_proposed 
+buildings <- buildings[  buildings$technical_solution_proposed != '', ]
+# rename the column
+colnames(buildings)[24] <- 'reconstruction_needed'
+# re re-encode the values and combine values to have a binary classification 
+levels(buildings$reconstruction_needed)[5] <- 'Yes'
+levels(buildings$reconstruction_needed)[1:4] <- 'No'
+buildings$reconstruction_needed <- factor(buildings$reconstruction_needed)
+
+```
+
+Finally, we make sure that all factor variables are encoded as such.
+
+```{r }
+buildings$has_superstructure_adobe_mud <- 
+  as.factor(buildings$has_superstructure_adobe_mud)
+buildings$has_superstructure_mud_mortar_stone <- 
+  as.factor(buildings$has_superstructure_mud_mortar_stone)
+buildings$has_superstructure_stone_flag <- 
+  as.factor(buildings$has_superstructure_stone_flag)
+buildings$has_superstructure_cement_mortar_stone <- 
+  as.factor(buildings$has_superstructure_cement_mortar_stone)
+buildings$has_superstructure_mud_mortar_brick <- 
+  as.factor(buildings$has_superstructure_mud_mortar_brick)
+buildings$has_superstructure_cement_mortar_brick <- 
+  as.factor(buildings$has_superstructure_cement_mortar_brick)
+buildings$has_superstructure_timber <- 
+  as.factor(buildings$has_superstructure_timber)
+buildings$has_superstructure_bamboo <- 
+  as.factor(buildings$has_superstructure_bamboo)
+buildings$has_superstructure_rc_non_engineered <- 
+  as.factor(buildings$has_superstructure_rc_non_engineered)
+buildings$has_superstructure_rc_engineered <- 
+  as.factor(buildings$has_superstructure_rc_engineered)
+buildings$has_superstructure_other <- 
+  as.factor(buildings$has_superstructure_other)
+
+buildings$district_id <- as.factor(buildings$district_id)
+
+```
+
+
+# 5 Results
+
+In this section, we present the results from our explorative data analysis, feature selection process and model creation.
+
+## 5.1 Explorative data analysis
+
+### 5.1.1 Label reconstruction_needed
+
+As we can see in Figure 1 below, the need for reconstruction is approximately equally distributed with 58% of buildings that need reconstruction after the earthquake and 42% of buildings that do not need any reconstruction.
+
+```{r}
+tbl <- table(buildings$reconstruction_needed)
+prop.table(tbl)
+```
+
+```{r fig1, echo=FALSE, message=FALSE, fig.cap = "Distribution Reconstruction needed", fig.width = 4, fig.height = 2 }
+ggplot(aes(x = reconstruction_needed), data = buildings) +
+  geom_histogram(stat="count") + 
+  labs(title="Reconstruction needed", x = "Reconstruction needed", y="Count") + 
+  scale_y_continuous(labels = comma)
+```
+
+### 5.1.2 Features description
+
+The data set contains four numerical features: _count_floors_pre_eq_, _height_ft_pre_eq, _age_building_ and _plinth_area_sq_ft_. The table below provides an overview of the most important statistical indicators.
+
+
+```{r}
+summary(buildings[, c('count_floors_pre_eq', 'height_ft_pre_eq', 
+                      'age_building', 'plinth_area_sq_ft')])
+```
+
+#### 5.1.2.1 count_floors_pre_eq
+
+The median number of floors of buildings in our data set is 2. The building with the most number of floors has 9 floors.
+Figure 2 displays the difference of number of floors by _reconstruction_needed_ of buildings with less than 5 floors as boxplots. We can identify a slight tendency that buildings with a higher number of floors may be more likely to need recontruction after the earthquake.
+
+```{r fig2, echo=FALSE, fig.cap = "Number of floors by Reconstruction needed", fig.width = 5, fig.height = 2 }
+ggplot(data=buildings[ buildings$count_floors_pre_eq < 5 , ], mapping=aes(x=reconstruction_needed, y=count_floors_pre_eq)) + 
+  geom_boxplot() + 
+  labs(title="Number of floors by Reconstruction needed", x = "Reconstruction needed", y="Number of floors")
+```
+
+#### 5.1.2.2 height_ft_pre_eq
+
+While the average building is 16.31 feet tall, the highest building is 305 feet tall.
+In Figure 3, we can see the height of buildings in feet grouped by the need for reconstruction. In order to allow a visual comparison, we restricted the height to all buildings below 25 feet. It seems that the majority of buildings that need reconstruction are tending to be higher. This correspondes to our findings regarding the number of floors.
+
+```{r fig3, echo=FALSE, fig.cap = "Height by Reconstruction needed", fig.width = 4, fig.height = 2 }
+ggplot(data=buildings[ buildings$height_ft_pre_eq < 25 , ], mapping=aes(x=reconstruction_needed, y=height_ft_pre_eq)) + 
+  geom_boxplot() + 
+  labs(title="Height by Reconstruction needed", x = "Reconstruction needed", y="Height in feet")
+```
+
+#### 5.1.2.3 age_building
+
+Another numerical feature of our data set is the age of buildings. The average age of a building is 27.75 years. However, the median age is only 18 years. From this difference, we can see that there are probably some outliers which is also confirmed by Figure 4 which shows the distribution of age.
+
+```{r fig4, echo=FALSE, fig.cap = "Distribution of age", fig.width = 5, fig.height = 2, message=FALSE }
+ggplot(data=buildings, mapping=aes(x=age_building)) + geom_histogram() + 
+  labs(title="Histogram of Age of building", x = "Age of building in years", y="Count") + 
+  scale_y_continuous(labels = comma)
+```
+
+As a consequence, we limit our graphical comparison of the age of buildings by _reconstruction_needed_ to buildings with an age below 50 years. In Figure 5, we can see a slight tendency of older buildings to need reconstruction after the earthquake.
+
+
+```{r fig5, echo=FALSE, fig.cap = "Age of building by Reconstruction needed", fig.width = 4, fig.height = 2 }
+ggplot(data=buildings[ buildings$age_building < 50 , ], mapping=aes(x=reconstruction_needed, y=age_building)) + 
+  geom_boxplot() + 
+  labs(title="Age of building by Reconstruction needed", x = "Reconstruction needed", y="Age of building in years")
+```
+
+Besides these numerical features, the data set also contains a rich categorical variable set that mainly refers to construction features of the buildings. In these section, we only introduce the ones that seem to have an impact on the need for reconstruction in order to focus on the important information and to keep the section short. All other variables can be found in Appendix A.
+
+
+```{r , echo=FALSE,}
+create_cat_graphs <- function(ds, x1, y1, fill1, title2, x2, y2, fill2) {
+  
+  # p1 <- ds %>%
+  #   ggplot(aes(x1, y1)) + 
+  #   geom_tile(aes(fill = fill1), colour = "white") + 
+  #   scale_fill_gradient(low = "#56B1F7", high = "#132B43") + 
+  #   labs(title=title2, x = x2, y= y2) + 
+  #   scale_y_continuous(labels = comma)
+  p2 <- ds %>%
+    ggplot(mapping=aes(x=x1, y=fill1, fill = y1)) +
+    geom_bar(position="dodge",stat="identity") + 
+    labs(title=title2, x = x2, y= y2, fill = fill2) + 
+    scale_y_continuous(labels = comma)
+  # grid.arrange(p1, p2, ncol=2)
+  grid.arrange(p2,  ncol=1)
+}
+```
+
+#### 5.1.2.4 district_id
+
+_district_id_ is a categorical variable with an identifier of the district in which the building is located.Figure 6 shows the number of buildings in each district grouped by _reconstruction_needed_. As we can see, there seems to be an impact of the district location on the need for reconstruction.
+
+```{r fig6, echo=FALSE, fig.cap = "District by Reconstruction needed", fig.width = 8, fig.height = 3 }
+district <- buildings %>% group_by(reconstruction_needed, district_id) %>% summarize(Count = n()) 
+district %>%
+  ggplot(aes(reconstruction_needed, district_id)) + 
+  geom_tile(aes(fill = Count), colour = "white") + 
+  scale_fill_gradient(low = "#56B1F7", high = "#132B43") +  
+  labs(title="District by Reconstruction needed", x = "Reconstruction needed", y="District")
+
+```
+
+#### 5.1.2.5 foundation_type
+
+The type of foundation used in the building seems also to have an impact on the need for reconstruction as shown in Figure 7. Specifically, the RC (reinforced concrete) foundation type shows a different pattern if reconstruction is need, i.e. a lower number of buildings with an RC foundation type need reconstruction.
+
+```{r fig7, echo=FALSE, fig.cap = "District by Reconstruction needed", fig.width = 9, fig.height = 3 }
+ft <- buildings %>% group_by(reconstruction_needed, foundation_type) %>% summarize(Count = n()) 
+create_cat_graphs(ft, ft$reconstruction_needed , ft$foundation_type, ft$Count,
+                  "Foundation type by Reconstruction needed", "Reconstruction needed", "Foundation type", "Foundation")
+```
+
+#### 5.1.2.6 roof_type
+
+In Figure 8, we cannot see a difference in the pattern for heavy or ligh bamboo or timer roofs depending on the need for reconstruction. However, the RCC/RB/RBC shows a divergent pattern. This may indicate that buildings with this type of roof are more likely to not need reconstruction.
+
+```{r fig8, echo=FALSE, fig.cap = "Roof type by Reconstruction needed", fig.width = 9, fig.height = 3 }
+rt <- buildings %>% group_by(reconstruction_needed, roof_type) %>% summarize(Count = n()) 
+create_cat_graphs(rt, rt$reconstruction_needed , rt$roof_type, rt$Count,
+                  "Roof type by Reconstruction needed", "Reconstruction needed", "Roof type", "Roof")
+```
+
+#### 5.1.2.7 ground_floor_type
+
+As shown in Figure 9, the ground floor type shows a different pattern depending if the buildings needs reconstruction or not. Specifically, buildings built on mud seem to be more likely to have a need for reconstruction. On the contrary, buildings built on a RC (reinforced concrete) ground floor type do not tend to need reconstruction.
+
+```{r fig9, echo=FALSE, fig.cap = "Ground floor type by Reconstruction needed", fig.width = 9, fig.height = 3 }
+gft <- buildings %>% group_by(reconstruction_needed, ground_floor_type) %>% summarize(Count = n())
+create_cat_graphs(gft, gft$reconstruction_needed , gft$ground_floor_type, gft$Count,
+                  "Ground floor type by Reconstruction needed", "Reconstruction needed", "Ground floor type", "Ground floor")
+
+```
+
+#### 5.1.2.8 other_floor_type
+
+The _other_floor_type_ variable represents the type of construction used in other floors except ground floor and roof. In Figure 10, we see a slightly different pattern between other_floor_type grouped by _reconstruction_needed_. It seems buildings that have RCC/RB/RBC floor types tend to need less reconstruction.
+
+```{r fig10, echo=FALSE, fig.cap = "Other floor type by Reconstruction needed", fig.width = 9, fig.height = 3 }
+oft <- buildings %>% group_by(reconstruction_needed, other_floor_type) %>% summarize(Count = n())
+create_cat_graphs(oft, oft$reconstruction_needed , oft$other_floor_type, oft$Count,
+                  "Other floor type by Reconstruction needed", "Reconstruction needed", "Other floor type", "Other floor")
+
+```
+
+#### 5.1.2.9 has_superstructure_mud_mortar_stone
+
+Figure 11 depicts the relationship of a superstructure of mud, mortar and stone with the need for reconstruction. As we can see, there is a difference in the groups that indicate that buildings with a superstructure of mud, mortar and stone might need reconstruction more likely.
+
+```{r fig11, echo=FALSE, fig.cap = "Superstructure mud mortar stone by Reconstruction needed", fig.width = 9, fig.height = 3 }
+sc_mms <- buildings %>% group_by(reconstruction_needed, has_superstructure_mud_mortar_stone) %>% summarize(Count = n())
+create_cat_graphs(sc_mms, sc_mms$reconstruction_needed , sc_mms$has_superstructure_mud_mortar_stone, sc_mms$Count,
+                  "Superstructure mud mortar stone by Reconstruction needed", "Reconstruction needed", "Superstructure mud mortar stone", "Mud mortar stone")
+
+```
+
+#### 5.1.2.10 has_superstructure_cement_mortar_brick
+
+In Figure 12, we can see a divergent pattern between buildings that need reconstruction and the ones that do not need based on the use of cement, mortar and bricks in the superstructure. Buildings that are based on cement, mortar and bricks seem to be less likely to need reconstruction.
+
+```{r fig12, echo=FALSE, fig.cap = "Superstructure cement mortar brick by Reconstruction needed", fig.width = 9, fig.height = 3 }
+sc_cmb <- buildings %>% group_by(reconstruction_needed, has_superstructure_cement_mortar_brick) %>% summarize(Count = n())
+create_cat_graphs(sc_cmb, sc_cmb$reconstruction_needed , sc_cmb$has_superstructure_cement_mortar_brick, sc_cmb$Count,
+                  "Superstructure cement mortar brick by Reconstruction needed", "Reconstruction needed", "Superstructure cement mortar brick", "Cement mortar brick")
+
+```
+
+#### 5.1.2.11 has_superstructure_timber
+
+Figure 13 shows the relationship between a superstructure of timber and the need for reconstruction. As we can see, buildings that don't have a superstructure of timber show a slight tendency to have a need for reconstruction.
+
+```{r fig13, echo=FALSE, fig.cap = "Superstructure timber by Reconstruction needed", fig.width = 9, fig.height = 3 }
+sc_t <- buildings %>% group_by(reconstruction_needed, has_superstructure_timber) %>% summarize(Count = n())
+create_cat_graphs(sc_t, sc_t$reconstruction_needed , sc_t$has_superstructure_timber, sc_t$Count,
+                  "Superstructure timber by Reconstruction needed", "Reconstruction needed", "Superstructure timber", "Timber")
+```
+
+#### 5.1.2.12 has_superstructure_timber
+
+Similar to superstructure of timber, buildings with superstructure of bamboo seem to be slightly less likely to have a need for reconstruction as shown in Figure 14.
+
+```{r fig14, echo=FALSE, fig.cap = "Superstructure bamboo by Reconstruction needed", fig.width = 9, fig.height = 3 }
+sc_b <- buildings %>% group_by(reconstruction_needed, has_superstructure_bamboo) %>% summarize(Count = n())
+create_cat_graphs(sc_b, sc_b$reconstruction_needed , sc_b$has_superstructure_bamboo, sc_b$Count,
+                  "Superstructure bamboo by Reconstruction needed", "Reconstruction needed", "Superstructure bamboo", "Bamboo")
+```
+
+#### 5.1.2.13 has_superstructure_rc_non_engineered and has_superstructure_rc_engineered
+
+For buildings with a superstructure of RC (reinforced concrete), there seems to be a trend that those buildings are less likely to have a need for reconstruction (independently whether they are engineered or not) as shown in Figure 15 and Figure 16.
+
+```{r fig15, echo=FALSE, fig.cap = "Superstructure RC non engineered by Reconstruction needed", fig.width = 9, fig.height = 3 }
+sc_rc_ne <- buildings %>% group_by(reconstruction_needed, has_superstructure_rc_non_engineered) %>% summarize(Count = n())
+create_cat_graphs(sc_rc_ne, sc_rc_ne$reconstruction_needed , sc_rc_ne$has_superstructure_rc_non_engineered, sc_rc_ne$Count,
+                  "Superstructure RC non engineered by Reconstruction needed", "Reconstruction needed", "Superstructure RC non engineered", "RC non engineered")
+
+```
+
+```{r fig16, echo=FALSE, fig.cap = "Superstructure RC engineered by Reconstruction needed", fig.width = 9, fig.height = 3 }
+sc_rc_e <- buildings %>% group_by(reconstruction_needed, has_superstructure_rc_engineered) %>% summarize(Count = n())
+create_cat_graphs(sc_rc_e, sc_rc_e$reconstruction_needed , sc_rc_e$has_superstructure_rc_engineered, sc_rc_e$Count,
+                  "Superstructure RC engineered by Reconstruction needed", "Reconstruction needed", "Superstructure RC engineered", "RC engineered")
+
+
+```
+
+## 5.2 Feature selection process
+
+As already mentioned in Section 3, we limit the features in the data set to those that seem to have an influence on _reconstruction_needed_. Therefore, we take a two-steps approach.
+
+- First, we select features based on our findings from the EDA in the section before
+- Second, we employ a handful of models from the Caret package that include feature importance
+
+From our results in the EDA, we identify the following variables that might be useful for a prediction model.
+
+- count_floors_pre_eq
+- height_ft_pre_eq
+- age_building
+- plinth_area_sq_ft
+- district_id
+- foundation_type
+- roof_type
+- ground_floor_type
+- other_floor_type
+- has_superstructure_mud_mortar_stone 
+- has_superstructure_cement_mortar_brick 
+- has_superstructure_timber
+- has_superstructure_bamboo 
+- has_superstructure_rc_non_engineered 
+- has_superstructure_rc_engineered
+
+As a next step, we use the following models from the Caret package (see https://rdrr.io/cran/caret/man/models.html) to determine feature importance. ^[For detailed code please see the accompanying R script if you are interested]
+
+- xgbTree
+- rf
+- kknn
+- avNNet
+- wsrf
+
+First, we select a subset of the data set and train the selected models. Then, we obtain the feature importance results.
+
+The results of the most important features are shown below and basically confirm our feature selection results from the EDA. The table below shows the 15 most important features for each of the selected models.
+
+
+```{r echo=FALSE }
+# IMPORTANT NOTE: the code to create these results is not executed on the fly because it would take too long
+# if you want to execute the code please refer to the accompanying R script
+imp.xgbTree <- c('ground_floor_type', 'district_id', 'foundation_type', 'age_building', 'plinth_area_sq_ft', 
+  'has_superstructure_cement_mortar_brick', 'has_superstructure_mud_mortar_stone', 'count_floors_pre_eq', 
+  'other_floor_type', 'height_ft_pre_eq', 'roof_type', 'has_superstructure_rc_non_engineered',
+  'has_superstructure_bamboo', 'has_superstructure_rc_engineered', 'has_superstructure_mud_mortar_brick')
+imp.rf <- c('district_id', 'has_superstructure_mud_mortar_stone', 'ground_floor_type', 'count_floors_pre_eq', 'foundation_type',
+            'age_building', 'height_ft_pre_eq', 'has_superstructure_cement_mortar_brick', 'plinth_area_sq_ft',
+            'other_floor_type', 'roof_type', 'has_superstructure_adobe_mud', 'has_superstructure_bamboo1', 
+            'has_superstructure_mud_mortar_brick', 'has_superstructure_cement_mortar_stone')
+imp.kknn <- c('other_floor_type', 'age_building', 'has_superstructure_mud_mortar_stone', 'count_floors_pre_eq', 'ground_floor_type',
+            'height_ft_pre_eq', 'plinth_area_sq_ft', 'roof_type', 'has_superstructure_cement_mortar_brick', 'district_id',
+            'has_superstructure_rc_non_engineered', 'has_superstructure_timber', 'has_superstructure_bamboo',
+            'has_superstructure_rc_engineered', 'position')
+imp.avNNet <- c('other_floor_type', 'age_building', 'has_superstructure_mud_mortar_stone', 'count_floors_pre_eq', 'ground_floor_type',
+                'height_ft_pre_eq', 'plinth_area_sq_ft', 'roof_type', 'has_superstructure_cement_mortar_brick', 'district_id',
+                'has_superstructure_rc_non_engineered', 'has_superstructure_timber', 'has_superstructure_bamboo', 
+                'has_superstructure_rc_engineered', 'has_superstructure_timber')
+imp.wsrf <- c('other_floor_type', 'age_building', 'has_superstructure_mud_mortar_stone', 'count_floors_pre_eq', 'ground_floor_type',
+              'height_ft_pre_eq', 'plinth_area_sq_ft', 'roof_type', 'has_superstructure_cement_mortar_brick', 'district_id', 
+              'has_superstructure_rc_non_engineered', 'has_superstructure_timber', 'has_superstructure_bamboo', 'has_superstructure_rc_engineered',
+              'position')
+imp <- data.frame(xgbTree = imp.xgbTree, RF = imp.rf, KKNN =  imp.kknn, avNNet = imp.avNNet, WSRF =  imp.wsrf)
+imp
+```
+
+## 5.3 Model creation
+
+### 5.3.1 Data preparation
+
+Based on our findings from the feature selection procedure, we limit the features in the data set to the relevant ones.
+
+```{r}
+limited_buildings <- buildings[ , c('reconstruction_needed',
+                                    'count_floors_pre_eq',
+                                    'height_ft_pre_eq',
+                                    'age_building',
+                                    'plinth_area_sq_ft',
+                                    'district_id',
+                                    'foundation_type',
+                                    'roof_type',
+                                    'ground_floor_type',
+                                    'other_floor_type',
+                                    'has_superstructure_mud_mortar_stone', 
+                                    'has_superstructure_cement_mortar_brick', 
+                                    'has_superstructure_timber',
+                                    'has_superstructure_bamboo',
+                                    'has_superstructure_rc_non_engineered',
+                                    'has_superstructure_rc_engineered')]
+
+```
+
+Then, we Z-normalize the continuous variables to prevent over-weighting the importance of
+variables.
+
+```{r}
+znorm <- function(d){
+  d.mean <- mean(d)
+  d.dev <- sd(d)
+  (d - d.mean)/d.dev
+}
+
+buildings$count_floors_pre_eq <- znorm(buildings$count_floors_pre_eq)
+buildings$age_building <- znorm(buildings$age_building)
+buildings$plinth_area_sq_ft <- znorm(buildings$plinth_area_sq_ft)
+buildings$height_ft_pre_eq <- znorm(buildings$height_ft_pre_eq)
+```
+
+### 5.3.2 Model comparison and selection
+
+For the model comparison and selection, we take again only a small proportion (`r ratio`) of the data set to speed up execution time.
+
+```{r}
+model_selection_index <- createDataPartition(limited_buildings$reconstruction_needed, 
+                                             times = 1, p = ratio, list = FALSE)
+ms_buildings <- limited_buildings[model_selection_index, ]
+```
+
+Then, we create the needed train and test sets.
+
+```{r }
+test_index <- createDataPartition(ms_buildings$reconstruction_needed, 
+                                  times = 1, p = 0.5, list = FALSE)
+test_set <- ms_buildings[test_index, ]
+train_set <- ms_buildings[-test_index, ]
+```
+
+As a next step, we use a selection of models that we train on the train set. The models 
+were selected with the intention to represent different model classes like decision trees and forests, boosting models, SVM, neural nets or weighted k-Nearest Neighbor.^[NOTE: Due to performance reasons, we do not employ an _apply_ statement.]
+
+```{r message=FALSE,  results="hide", warning=FALSE}
+ms.gbm <- train(reconstruction_needed ~ ., method = "gbm", data = train_set)
+ms.ranger <- train(reconstruction_needed ~ ., method = "ranger", data = train_set)
+ms.xgbTree <- train(reconstruction_needed ~ ., method = "xgbTree", data = train_set)
+ms.rf <- train(reconstruction_needed ~ ., method = "rf", data = train_set)
+ms.svmLinear <- train(reconstruction_needed ~ ., method = "svmLinear", data = train_set)
+ms.kknn <- train(reconstruction_needed ~ ., method = "kknn", data = train_set)
+ms.avNNet <- train(reconstruction_needed ~ ., method = "avNNet", data = train_set)
+ms.svmRadialCost <- train(reconstruction_needed ~ ., method = "svmRadialCost", data = train_set)
+ms.naive_bayes <- train(reconstruction_needed ~ ., method = "naive_bayes", data = train_set)
+ms.wsrf <- train(reconstruction_needed ~ ., method = "wsrf", data = train_set)
+```
+
+Then, we create predictions for all trained models.^[AGAIN: Due to performance reasons, we do not employ an _apply_ statement.]
+
+```{r}
+ms.gbm.pred <- predict(ms.gbm, newdata = test_set)
+ms.ranger.pred <- predict(ms.ranger, newdata = test_set)
+ms.xgbTree.pred <- predict(ms.xgbTree, newdata = test_set)
+ms.rf.pred <- predict(ms.rf, newdata = test_set)
+ms.svmLinear.pred <- predict(ms.svmLinear, newdata = test_set)
+ms.kknn.pred <- predict(ms.kknn, newdata = test_set)
+ms.avNNet.pred <- predict(ms.avNNet, newdata = test_set)
+ms.svmRadialCost.pred <- predict(ms.svmRadialCost, newdata = test_set)
+ms.naive_bayes.pred <- predict(ms.naive_bayes, newdata = test_set)
+ms.wsrf.pred <- predict(ms.wsrf, newdata = test_set)
+```
+
+As a next step, we determine the confusion matrices for all models.
+
+```{r}
+cm <- c(
+  gbm = confusionMatrix(ms.gbm.pred, 
+                        test_set$reconstruction_needed)$overall["Accuracy"],
+  ranger = confusionMatrix(ms.ranger.pred, 
+                           test_set$reconstruction_needed)$overall["Accuracy"],
+  xgbTree = confusionMatrix(ms.xgbTree.pred, 
+                            test_set$reconstruction_needed)$overall["Accuracy"],
+  rf = confusionMatrix(ms.rf.pred, 
+                       test_set$reconstruction_needed)$overall["Accuracy"],
+  svmLinear = confusionMatrix(ms.svmLinear.pred,
+                              test_set$reconstruction_needed)$overall["Accuracy"],
+  kknn = confusionMatrix(ms.kknn.pred, 
+                         test_set$reconstruction_needed)$overall["Accuracy"],
+  avNNet = confusionMatrix(ms.avNNet.pred, 
+                           test_set$reconstruction_needed)$overall["Accuracy"],
+  svmRadialCost = confusionMatrix(ms.svmRadialCost.pred, 
+                                  test_set$reconstruction_needed)$overall["Accuracy"],
+  naive_bayes = confusionMatrix(ms.naive_bayes.pred, 
+                                test_set$reconstruction_needed)$overall["Accuracy"],
+  wsrf = confusionMatrix(ms.wsrf.pred, 
+                         test_set$reconstruction_needed)$overall["Accuracy"]
+)
+```
+
+Subsequently, we create an ensemble model to combine all models. We start by creating a dataframe with all predictions from the different models.
+
+```{r}
+ensemble <- data_frame(
+  ms.gbm.pred = ms.gbm.pred,
+  ms.ranger.pred = ms.ranger.pred,
+  ms.xgbTree.pred = ms.xgbTree.pred,
+  ms.rf.pred = ms.rf.pred,
+  ms.svmLinear.pred = ms.svmLinear.pred,
+  ms.kknn.pred = ms.kknn.pred,
+  ms.avNNet.pred = ms.avNNet.pred,
+  ms.svmRadialCost.pred = ms.svmRadialCost.pred,
+  ms.naive_bayes.pred = ms.naive_bayes.pred,
+  ms.wsrf.pred = ms.wsrf.pred
+)
+```
+
+We define an ensemble function. For every model, we take the mean value and then set to 'Yes' or 'No' based on the majority of values.
+
+```{r}
+calc_ensemble_val <- function(r) {
+  ifelse(mean(r == 'Yes') > 0.5, 'Yes', 'No')
+}
+```
+
+We determine the predictions and calculate the confusion matrices of the ensemble model.
+
+```{r}
+ensemble.pred <- apply(ensemble, 1, calc_ensemble_val)
+ensemble.pred <- as.factor(ensemble.pred)
+ensemble.cm <- confusionMatrix(ensemble.pred, test_set$reconstruction_needed)
+cm <- c(cm, ensemble = ensemble.cm$overall["Accuracy"])
+```
+
+Finally, we determine the model with the best accuracy.
+
+```{r}
+results <- sort(cm, decreasing = TRUE)
+results
+```
+
+All models are characterized by an accuracy between `r round(max(results), 2)` and `r round(min(results), 2)` and seem to be sufficient for prediction of the need for reconstruction. The results show that the `r gsub('.Accuracy', '', names(results[results == max(results)]))` model with an accuracy of about `r round(max(results), 2)` is slightly better than the other models. 
+
+# 6 Conclusion
+
+This analysis has shown that the need for reconstruction of buildings caused by the 2015 Nepal earthquake can be confidently predicted from its features. In particular, the height and the count of floor before the earthquake, the age of the building, the plinth area, the district ID, the foundation, roof type and ground floor types, as well as categorical variables regarding the superstructure have a significant effect on the need for reconstruction.
+The findings from this analysis could be used for better future construction of earthquake-proof buildings in Nepal.
+
+\pagebreak
+
+# Appendix A: Additional feature description
+
+The following variables of the data set seem to have no relationship with the label reconstruction_needed, i.e. they have no impact if the buildings need reconstruction after the earthquake or not. Visualizations of the relationship are included in this Appendix for reasons of completeness.
+
+- land_surface_condition (see Figure 17)
+- position (see Figure 18)
+- plan_configuration (see Figure 19)
+- has_superstructure_adobe_mud (see Figure 20)
+- has_superstructure_stone_flag (see Figure 21)
+- has_superstructure_cement_mortar_stone (see Figure 22)
+- has_superstructure_mud_mortar_brick (see Figure 23)
+- has_superstructure_other (see Figure 24)
+
+\pagebreak
+
+```{r fig17, echo=FALSE, fig.cap = "Land surface condition by Reconstruction needed", fig.width = 9, fig.height = 3 }
+lsc <- buildings %>% group_by(reconstruction_needed, land_surface_condition) %>% summarize(Count = n()) 
+create_cat_graphs(lsc, lsc$reconstruction_needed , lsc$land_surface_condition, lsc$Count,
+                  "Land surface condition by Reconstruction needed", "Reconstruction needed", "Land surface condition", "Surface")
+```
+
+```{r fig18, echo=FALSE, fig.cap = "Position by Reconstruction needed", fig.width = 9, fig.height = 3 }
+posi <- buildings %>% group_by(reconstruction_needed, position) %>% summarize(Count = n())
+create_cat_graphs(posi, posi$reconstruction_needed , posi$position, posi$Count,
+                  "Position by Reconstruction needed", "Reconstruction needed", "Position", "Position")
+```
+
+```{r fig19, echo=FALSE, fig.cap = "Plan configuration by Reconstruction needed", fig.width = 9, fig.height = 3 }
+pc <- buildings %>% group_by(reconstruction_needed, plan_configuration) %>% summarize(Count = n())
+create_cat_graphs(pc, pc$reconstruction_needed , pc$plan_configuration, pc$Count,
+                  "Plan configuration by Reconstruction needed", "Reconstruction needed", "Plan configuration", "Plan configuration")
+
+```
+
+```{r fig20, echo=FALSE, fig.cap = "Superstructure adobe mud by Reconstruction needed", fig.width = 9, fig.height = 3 }
+sc_adobe_mud <- buildings %>% group_by(reconstruction_needed, has_superstructure_adobe_mud) %>% summarize(Count = n())
+create_cat_graphs(sc_adobe_mud, sc_adobe_mud$reconstruction_needed , sc_adobe_mud$has_superstructure_adobe_mud, sc_adobe_mud$Count,
+                  "Superstructure adobe mud by Reconstruction needed", "Reconstruction needed", "Superstructure adobe mud", "Adobe mud")
+
+```
+
+```{r fig21, echo=FALSE, fig.cap = "Superstructure stone by Reconstruction needed", fig.width = 9, fig.height = 3 }
+sc_stone <- buildings %>% group_by(reconstruction_needed, has_superstructure_stone_flag) %>% summarize(Count = n())
+create_cat_graphs(sc_stone, sc_stone$reconstruction_needed , sc_stone$has_superstructure_stone_flag, sc_stone$Count,
+                  "Superstructure stone by Reconstruction needed", "Reconstruction needed", "Superstructure stone", "Stone")
+```
+
+```{r fig22, echo=FALSE, fig.cap = "Superstructure cement mortar stone by Reconstruction needed", fig.width = 9, fig.height = 3 }
+sc_cms <- buildings %>% group_by(reconstruction_needed, has_superstructure_cement_mortar_stone) %>% summarize(Count = n())
+create_cat_graphs(sc_cms, sc_cms$reconstruction_needed , sc_cms$has_superstructure_cement_mortar_stone, sc_cms$Count,
+                  "Superstructure cement mortar stone by Reconstruction needed", "Reconstruction needed", "Superstructure cement mortar stone", "Cement mortar stone")
+
+```
+
+```{r fig23, echo=FALSE, fig.cap = "Superstructure mud mortar brick by Reconstruction needed", fig.width = 9, fig.height = 3 }
+sc_mmb <- buildings %>% group_by(reconstruction_needed, has_superstructure_mud_mortar_brick) %>% summarize(Count = n())
+create_cat_graphs(sc_mmb, sc_mmb$reconstruction_needed , sc_mmb$has_superstructure_mud_mortar_brick, sc_mmb$Count,
+                  "Superstructure mud mortar brick by Reconstruction needed", "Reconstruction needed", "Superstructure mud mortar brick", "Mud mortar brick")
+
+
+```
+
+```{r fig24, echo=FALSE, fig.cap = "Superstructure other by Reconstruction needed", fig.width = 9, fig.height = 3 }
+sc_o <- buildings %>% group_by(reconstruction_needed, has_superstructure_other) %>% summarize(Count = n())
+create_cat_graphs(sc_o, sc_o$reconstruction_needed , sc_o$has_superstructure_other, sc_o$Count,
+                  "Superstructure other by Reconstruction needed", "Reconstruction needed", "Superstructureother", "Other")
+```
+
